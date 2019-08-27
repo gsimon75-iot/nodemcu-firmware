@@ -7,8 +7,8 @@
 // this out and enabling the explicitly size, e.g. FLASH_4M.  Valid sizes are
 // FLASH_512K, FLASH_1M, FLASH_2M, FLASH_4M, FLASH_8M, FLASH_16M.
 
-#define FLASH_AUTOSIZE
-//#define FLASH_4M
+//#define FLASH_AUTOSIZE
+#define FLASH_4M
 
 
 // The firmware now selects a baudrate of 115,200 by default, but the driver
@@ -18,7 +18,8 @@
 // 368640].  Note that the last 3 rates are not recommended as these might be
 // unreliable, but 460800 seems to work well for most USB-serial devices.
 
-#define BIT_RATE_DEFAULT BIT_RATE_115200
+//#define BIT_RATE_DEFAULT BIT_RATE_115200
+#define BIT_RATE_DEFAULT 74880
 //#define BIT_RATE_AUTOBAUD
 
 
@@ -35,7 +36,7 @@
 // no performance loss.  However, you can define LUA_DWORD_ALIGNED_TVALUES and
 // this will force 16 byte TValues on FP builds.
 
-//#define LUA_NUMBER_INTEGRAL
+#define LUA_NUMBER_INTEGRAL
 //#define LUA_DWORD_ALIGNED_TVALUES
 
 
@@ -45,7 +46,7 @@
 // the size of the store that you need.  This can be any multiple of 4kB up to
 // a maximum 256Kb.
 
-//#define LUA_FLASH_STORE 0x10000
+#define LUA_FLASH_STORE 0x40000
 
 
 // By default Lua executes the file init.lua at start up.  The following
@@ -55,7 +56,7 @@
 // The example provided executes the LFS module "_init" at startup or fails
 // through to the interactive prompt.
 
-//#define LUA_INIT_STRING "pcall(function() node.flashindex'_init'() end)"
+#define LUA_INIT_STRING "pcall(function() node.flashindex'_init'() end)"
 
 
 // NodeMCU supports two file systems: SPIFFS and FATFS, the first is available
@@ -72,6 +73,7 @@
 // gives the fastest start-up and imaging times.
 
 #define BUILD_SPIFFS
+#define SPIFFS_FIXED_LOCATION        0xB0000
 //#define SPIFFS_FIXED_LOCATION        0x100000
 //#define SPIFFS_MAX_FILESYSTEM_SIZE    0x20000
 //#define SPIFFS_SIZE_1M_BOUNDARY
@@ -129,7 +131,7 @@
 #define WIFI_SDK_EVENT_MONITOR_ENABLE
 
 //  Enable creation on the wifi.eventmon.reason table
-#define WIFI_EVENT_MONITOR_DISCONNECT_REASON_LIST_ENABLE
+//#define WIFI_EVENT_MONITOR_DISCONNECT_REASON_LIST_ENABLE
 
 //  Enable use of the WiFi.monitor sub-module
 //#define LUA_USE_MODULES_WIFI_MONITOR
@@ -153,7 +155,7 @@
 // If you use the enduser_setup module, then you can also set the default
 // SSID when this module is running in AP mode.
 
-#define ENDUSER_SETUP_AP_SSID "SetupGadget"
+//#define ENDUSER_SETUP_AP_SSID "SetupGadget"
 
 
 // The following sections are only relevent for those developers who are

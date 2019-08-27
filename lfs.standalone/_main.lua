@@ -68,6 +68,6 @@ end
 print("Connecting to wifi;")
 wifi.setmode(wifi.STATION)
 wifi.eventmon.register(wifi.eventmon.STA_GOT_IP, on_wifi_got_ip)
-wifi.sta.config { ssid="agifules2", pwd="Pacikuki-192" }
+wifi.sta.config { ssid="qwerqwer", pwd="asdfasdf" }
 
 -- vim: set sw=4 ts=4 et:
