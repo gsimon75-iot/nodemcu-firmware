@@ -1,45 +1,21 @@
 httpserver = require("httpserver")
 
-function on_http_connect(self, is_connected)
-    if is_connected then
+function on_http_event(self, event, arg)
+    if event == "-connected" then
         local peer_port, peer_ip = self.conn:getpeer()
         print("Incoming connection; ip='" .. peer_ip .. "', port='" .. peer_port .. "'")
         -- we can store whatever we want in @self
         self.peer_ip = peer_ip
         self.peer_port = peer_port
-    else
-        print("Connection closed;")
-    end
-    return true
-end
-
-
-function on_http_request(self, method, path, proto, ver)
-    print("Request; method='" .. method .. "', path='" .. path .. "', proto='" .. proto .. "', ver='" .. ver .. "'")
-    -- we can store whatever we want in @self
-    self.method = method
-    self.path = path
-    self.content_length = 0
-end
-
-
-function on_http_receive(self, chunk, header_name, header_value)
-    if chunk ~= nil then
-        local chunk_len = chunk:len()
-        print("Request body; length='" .. chunk_len .. "', start='" .. chunk:sub(1, 16) .. "'")
-        -- self.send(chunk:lower())
-        self.send(chunk)
-        self.content_received = self.content_received + chunk_len
-        if self.content_received >= self.content_length then
-            print("Request received;")
-            self.close()
-        end
-    elseif header_name ~= nil then
-        print("Request header; name='" .. header_name .. "', value='" .. header_value .. "'")
-        if header_name == "content-length" then
-            self.content_length = tonumber(header_value)
-        end
-    else
+        return true
+    elseif event == "-request" then
+        print("Request; method='" .. arg.method .. "', path='" .. arg.path .. "', proto='" .. arg.proto .. "', ver='" .. arg.ver .. "'")
+        -- we can store whatever we want in @self
+        self.method = arg.method
+        self.path = arg.path
+    elseif event == "-header" then
+        print("Request header; name='" .. arg.name .. "', value='" .. arg.value .. "'")
+    elseif event == "-end-of-header" then
         print("Request header done;")
         self.start_response(200, "OK")
         self.send_header("X-Your-IP", self.peer_ip)
@@ -51,9 +27,17 @@ function on_http_receive(self, chunk, header_name, header_value)
         self.start_body()
         if self.content_length == 0 then
             self.close()
-        else
-            self.content_received = 0
         end
+    elseif event == "-body" then
+        local chunk_len = arg:len()
+        print("Request body; length='" .. chunk_len .. "', start='" .. arg:sub(1, 16) .. "'")
+        -- self.send(arg:lower())
+        self.send(arg)
+    elseif event == "-end-of-body" then
+        print("Request done;")
+        self.close()
+    elseif event == "-disconnected" then
+        print("Connection closed;")
     end
 end
 
@@ -61,7 +45,7 @@ end
 function on_wifi_got_ip(T)
     print("Connected to wifi; ip='" .. T.IP .. "'")
     print("Starting server; port='80'")
-    srv = httpserver.new(80, on_http_connect, on_http_request, on_http_receive)
+    srv = httpserver.new(80, on_http_event)
 end
 
 

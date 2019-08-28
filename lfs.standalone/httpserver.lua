@@ -11,9 +11,11 @@
 -- sckt:on(whatever) callbacks *must* be reset manually, otherwise they leak the memory
 
 -- Create a new http_connection object
-function new_http_connection(arg_conn, cbk_on_connect, cbk_on_request, cbk_on_receive)
+function new_http_connection(arg_conn, on_event)
     local self = {
         conn = arg_conn, -- the connection
+        content_length = 0,
+        content_remaining = 0,
     }
 
     local phase = 0 -- processing phase, 0: request line, 1: headers, 2: body
@@ -71,12 +73,26 @@ function new_http_connection(arg_conn, cbk_on_connect, cbk_on_request, cbk_on_re
         send("\r\n")
     end
 
-    local function on_receive_body(conn, payload)
+    local function on_event_body(conn, payload)
         -- We're processing a body chunk
-        cbk_on_receive(self, payload, nil, nil)
+        local payload_len = payload:len()
+        if payload_len == 0 then
+            -- do not send an event for empty data
+        elseif payload_len <= self.content_remaining then
+            on_event(self, "-body", payload)
+            self.content_remaining = self.content_remaining - payload_len
+        else
+            on_event(self, "-body", payload:sub(1, self.content_remaining))
+            -- FIXME: handle payload:sub(self.content_remaining + 1)
+            self.content_remaining = 0
+        end
+
+        if self.content_remaining <= 0 then
+            on_event(self, "-end-of-body")
+        end
     end
 
-    local function on_receive_request(conn, payload)
+    local function on_event_request(conn, payload)
         -- We're processing either the request line or a header
         -- Both are line-oriented, so we need to read until LF
         local line_start_pos = 1
@@ -99,30 +115,35 @@ function new_http_connection(arg_conn, cbk_on_connect, cbk_on_request, cbk_on_re
                 -- Processing the request line
                 local method, path, proto, ver = line:match("([A-Z]+)%s*([^%s]+)%s*([^/]+)/(.*)")
                 if method ~= nil then
-                    cbk_on_request(self, method, path, proto, ver)
+                    on_event(self, "-request", {method=method, path=path, proto=proto, ver=ver})
                     phase = 1 -- the upcoming lines are headers
                 else
-                    -- FIXME: Invalid request line, now what?
+                    on_event(self, "-error", {reason="BAD-REQ-LINE", data=line})
+                    -- skip and proceed
                 end
             else
                 -- Processing header lines
                 if line == "" then
                     -- End of header lines, body will follow
-                    conn:on("receive", on_receive_body)
+                    conn:on("receive", on_event_body)
                     -- Signal the end of header condition
-                    cbk_on_receive(self, nil, nil, nil)
+                    on_event(self, "-end-of-header", nil)
                     -- Pass the remainder (if any) as a body chunk
-                    if newline_pos < payload:len() then
-                        cbk_on_receive(self, payload:sub(newline_pos + 1), nil, nil)
-                    end
+                    on_event_body(self, payload:sub(newline_pos + 1))
                     break -- This chunk is done, wait for the next one
                 else
                     -- Got a header line
                     local header_name, header_value = line:match("([^:]*):%s*(.*)")
                     if header_name ~= nil then
-                        cbk_on_receive(self, nil, header_name:lower(), header_value)
+                        header_name = header_name:lower()
+                        if header_name == "content-length" then
+                            self.content_length = tonumber(header_value)
+                            self.content_remaining = self.content_length
+                        end
+                        on_event(self, "-header", {name=header_name, value=header_value})
                     else
-                        -- FIXME: Invalid header line, now what?
+                        on_event(self, "-error", {reason="BAD-HDR-LINE", data=line})
+                        -- skip and proceed
                     end
                 end
             end -- phase == { 0, 1 }
@@ -132,24 +153,20 @@ function new_http_connection(arg_conn, cbk_on_connect, cbk_on_request, cbk_on_re
     end
 
     local function on_connection_closed()
-        if cbk_on_connect ~= nil then
-            cbk_on_connect(self, false) 
-        end
+        on_event(self, "-disconnected") 
         clear_callbacks(arg_conn)
     end
 
     self.request_processed = function()
         phase = 0
         line = ""
-        arg_conn:on("receive", on_receive_request)
+        arg_conn:on("receive", on_event_request)
     end
 
     -- Provide an early way to refuse a connection on the IP:Port information
-    if cbk_on_connect ~= nil then
-        if not cbk_on_connect(self, true) then
-            arg_conn:close()
-            return nil
-        end
+    if not on_event(self, "-connected") then
+        arg_conn:close()
+        return nil
     end
 
     -- Register callbacks and wait for data
@@ -161,13 +178,17 @@ function new_http_connection(arg_conn, cbk_on_connect, cbk_on_request, cbk_on_re
 end
 
 
-function new_http_server(port, cbk_on_connect, cbk_on_request, cbk_on_receive)
-    -- cbk_on_connect(http_connection, is_connected), ret: bool -> true=accept, false=refuse
-    -- cbk_on_request(http_connection, method, path, proto, ver)
-    -- cbk_on_receive(http_connection, chunk, header_name, header_value)
+function new_http_server(port, on_event)
+    -- on_event(http_connection, event, arg)
+    --   event == "-connected":     arg = nil, ret = bool -> true=accept, false=refuse
+    --   event == "-request":       arg = { method=..., path=..., proto=..., ver=... }
+    --   event == "-header":        arg = { name=..., value=... }
+    --   event == "-end-of-header"  arg = nil
+    --   event == "-body":          arg = data chunk
+    --   event == "-disconnected":  arg = nil
+    --   event == "-error":         arg = { reason=..., data=... }
 
-    -- Check mandatory callbacks
-    if cbk_on_request == nil or cbk_on_receive == nil then
+    if on_event == nil then
         return nil
     end
 
@@ -184,7 +205,7 @@ function new_http_server(port, cbk_on_connect, cbk_on_request, cbk_on_receive)
 
     -- Start listening
     self.srv:listen(port, function(conn)
-        new_http_connection(conn, cbk_on_connect, cbk_on_request, cbk_on_receive)
+        new_http_connection(conn, on_event)
     end)
 
     return self
