@@ -73,43 +73,28 @@ function new_http_connection(arg_conn, on_event)
         send("\r\n")
     end
 
-    local function on_event_body(conn, payload)
-        -- We're processing a body chunk
-        local payload_len = payload:len()
-        if payload_len == 0 then
-            -- do not send an event for empty data
-        elseif payload_len <= self.content_remaining then
-            on_event(self, "-body", payload)
-            self.content_remaining = self.content_remaining - payload_len
-        else
-            on_event(self, "-body", payload:sub(1, self.content_remaining))
-            -- FIXME: handle payload:sub(self.content_remaining + 1)
-            self.content_remaining = 0
-        end
-
-        if self.content_remaining <= 0 then
-            on_event(self, "-end-of-body")
-        end
-    end
-
-    local function on_event_request(conn, payload)
-        -- We're processing either the request line or a header
-        -- Both are line-oriented, so we need to read until LF
-        local line_start_pos = 1
+    local function on_raw_receive(conn, payload)
+        local start_pos = 1 -- next position to parse
         while true do
-            local newline_pos = payload:find("\n", line_start_pos, true)
-            if newline_pos == nil then
-                -- Partial line -> keep collecting
-                line = line .. payload
-                break -- This chunk is processed, wait for the next one
-            end
-            -- Find the EOL, skipping an optional CR before the LF
-            local line_end_pos = payload:byte(newline_pos - 1) == 0x0d and newline_pos - 2 or newline_pos - 1
+            if phase == 0 or phase == 1 then
+                -- Parsing line-oriented parts -> collect a line or break the loop and wait for more data
+                local newline_pos = payload:find("\n", start_pos, true)
+                if newline_pos == nil then
+                    -- Partial line -> keep collecting
+                    line = line .. payload
+                    break -- This chunk is processed, wait for the next one
+                end
+                -- Find the EOL, skipping an optional CR before the LF
+                local line_end_pos = payload:byte(newline_pos - 1) == 0x0d and newline_pos - 2 or newline_pos - 1
 
-            -- Collect this line ...
-            line = line .. payload:sub(line_start_pos, line_end_pos)
-            --- ... and skip to the next one
-            line_start_pos = newline_pos + 1
+                -- Collect this line ...
+                line = line .. payload:sub(start_pos, line_end_pos)
+                --- ... and skip to the next one
+                start_pos = newline_pos + 1
+            end
+            -- Here:
+            -- * If we are reading line-oriented parts (phase==0 or ==1), then we have a @line
+            -- * If we are reading length-oriented part (phase==2), then we have a chunk
 
             if phase == 0 then
                 -- Processing the request line
@@ -119,19 +104,11 @@ function new_http_connection(arg_conn, on_event)
                     phase = 1 -- the upcoming lines are headers
                 else
                     on_event(self, "-error", {reason="BAD-REQ-LINE", data=line})
-                    -- skip and proceed
                 end
-            else
+                line = ""
+            elseif phase == 1 then
                 -- Processing header lines
-                if line == "" then
-                    -- End of header lines, body will follow
-                    conn:on("receive", on_event_body)
-                    -- Signal the end of header condition
-                    on_event(self, "-end-of-header", nil)
-                    -- Pass the remainder (if any) as a body chunk
-                    on_event_body(self, payload:sub(newline_pos + 1))
-                    break -- This chunk is done, wait for the next one
-                else
+                if line ~= "" then
                     -- Got a header line
                     local header_name, header_value = line:match("([^:]*):%s*(.*)")
                     if header_name ~= nil then
@@ -143,12 +120,43 @@ function new_http_connection(arg_conn, on_event)
                         on_event(self, "-header", {name=header_name, value=header_value})
                     else
                         on_event(self, "-error", {reason="BAD-HDR-LINE", data=line})
-                        -- skip and proceed
+                    end
+                else
+                    -- End of header
+                    on_event(self, "-end-of-header", nil)
+                    if self.content_remaining == 0 then
+                        on_event(self, "-end-of-body")
+                        phase = 0 -- The next request will follow
+                    else
+                        phase = 2 -- The body will follow
                     end
                 end
-            end -- phase == { 0, 1 }
+                line = ""
+            elseif phase == 2 then
+                -- We're processing a body chunk
+                local chunk_len = payload:len() - start_pos + 1
 
-            line = ""
+                if chunk_len == 0 then
+                    -- Do not send an event for empty data
+                    break -- processed all payload
+                elseif chunk_len <= self.content_remaining then
+                    -- All the payload belongs to the body
+                    on_event(self, "-body", payload:sub(start_pos))
+                    self.content_remaining = self.content_remaining - chunk_len
+                    if self.content_remaining == 0 then
+                        on_event(self, "-end-of-body")
+                        phase = 0 -- will continue with the next request
+                    end
+                    break -- processed all payload
+                else
+                    -- the payload is longer than the body
+                    on_event(self, "-body", payload:sub(start_pos, self.content_remaining))
+                    start_pos = start_pos + self.content_remaining
+                    self.content_remaining = 0
+                    on_event(self, "-end-of-body")
+                    phase = 0 -- continues with the next request
+                end
+            end
         end -- while true
     end
 
@@ -160,7 +168,7 @@ function new_http_connection(arg_conn, on_event)
     self.request_processed = function()
         phase = 0
         line = ""
-        arg_conn:on("receive", on_event_request)
+        arg_conn:on("receive", on_raw_receive)
     end
 
     -- Provide an early way to refuse a connection on the IP:Port information
