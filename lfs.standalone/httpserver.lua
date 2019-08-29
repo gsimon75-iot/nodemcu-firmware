@@ -58,10 +58,12 @@ function new_http_connection(arg_conn, on_event)
     self.send = send
 
     self.close = function()
+        self.expect_100_continue = nil
         send(false)
     end
 
     self.start_response = function(code, message)
+        self.expect_100_continue = nil
         send("HTTP/1.1 " .. code .. " " .. message .. "\r\n")
     end
 
@@ -101,6 +103,7 @@ function new_http_connection(arg_conn, on_event)
                 local method, path, proto, ver = line:match("([A-Z]+)%s*([^%s]+)%s*([^/]+)/(.*)")
                 if method ~= nil then
                     on_event(self, "-request", {method=method, path=path, proto=proto, ver=ver})
+                    self.expect_100_continue = nil
                     phase = 1 -- the upcoming lines are headers
                 else
                     on_event(self, "-error", {reason="BAD-REQ-LINE", data=line})
@@ -116,6 +119,9 @@ function new_http_connection(arg_conn, on_event)
                         if header_name == "content-length" then
                             self.content_length = tonumber(header_value)
                             self.content_remaining = self.content_length
+                        elseif header_name == "expect" and header_value == "100-continue" then
+                            self.expect_100_continue = true
+                            -- NOTE: automatically cleared by start_response and close
                         end
                         on_event(self, "-header", {name=header_name, value=header_value})
                     else
@@ -129,6 +135,9 @@ function new_http_connection(arg_conn, on_event)
                         phase = 0 -- The next request will follow
                     else
                         phase = 2 -- The body will follow
+                        if self.expect_100_continue then
+                            send("HTTP/1.1 100 Continue\r\n")
+                        end
                     end
                 end
                 line = ""
