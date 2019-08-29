@@ -19,7 +19,7 @@ WRITE_ARGS     	= --flash_size 4MB --flash_mode dout
 .PHONY:		clean erase install_fw install_spiffs install_lfs
 
 $(IMAGE_FILE):	*.lua
-		$(LUAC) -o $@ -f -a $(FLASH_BASE) -s $^
+		$(LUAC) -o $@ -f -a $(FLASH_BASE) -s $^ 2>&1 | sed -r 's/^[^:]*: //'
 
 clean:
 		rm -f LFS.*.img
