@@ -24,7 +24,7 @@ function on_http_event(self, event, arg)
         self.send_header("X-Req-Path", self.path)
         self.send_header("Content-Length", self.content_length)
         self.send_header("Content-Type", "text/plain")
-        self.start_body()
+        self.end_header()
         if self.content_length == 0 then
             self.close()
         end

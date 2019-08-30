@@ -10,8 +10,40 @@
 -- The user is free to store whatever data in the objects and add whatever methods he needs
 -- sckt:on(whatever) callbacks *must* be reset manually, otherwise they leak the memory
 
+local sjson = require("sjson")
+
+local http_response_codes = {}
+http_response_codes[100] = "Continue"
+http_response_codes[200] = "OK"
+http_response_codes[201] = "Created"
+http_response_codes[202] = "Accepted"
+http_response_codes[204] = "No Content"
+http_response_codes[205] = "Reset Content"
+http_response_codes[206] = "Partial Content"
+http_response_codes[301] = "Moved Permanently"
+http_response_codes[302] = "Found"
+http_response_codes[303] = "See Other"
+http_response_codes[304] = "Not Modified"
+http_response_codes[400] = "Bad Request"
+http_response_codes[401] = "Unauthorized"
+http_response_codes[403] = "Forbidden"
+http_response_codes[404] = "Not Found"
+http_response_codes[405] = "Method Not Allowed"
+http_response_codes[406] = "Not Acceptable"
+http_response_codes[408] = "Request Timeout"
+http_response_codes[409] = "Conflict"
+http_response_codes[410] = "Gone"
+http_response_codes[411] = "Length Required"
+http_response_codes[413] = "Payload Too Large"
+http_response_codes[414] = "URI Too Long"
+http_response_codes[415] = "Unsupported Media Type"
+http_response_codes[500] = "Internal Server Error"
+http_response_codes[501] = "Not Implemented"
+http_response_codes[503] = "Service Unavailable"
+
+
 -- Create a new http_connection object
-function new_http_connection(arg_conn, on_event)
+local function new_http_connection(arg_conn, on_event)
     local self = {
         conn = arg_conn, -- the connection
         content_length = 0,
@@ -63,17 +95,43 @@ function new_http_connection(arg_conn, on_event)
     end
 
     self.start_response = function(code, message)
+        local msg = message or http_response_codes[code] or "Unknown"
         self.expect_100_continue = nil
-        send("HTTP/1.1 " .. code .. " " .. message .. "\r\n")
+        send("HTTP/1.1 " .. code .. " " .. msg .. "\r\n")
     end
 
     self.send_header = function(name, value)
         send(name .. ": " .. value .. "\r\n")
     end
 
-    self.start_body = function()
+    self.end_header = function()
         send("\r\n")
     end
+
+    self.reset = function()
+        if self.conn_close then
+            self.close()
+        else
+            phase = 0
+            line = ""
+        end
+    end
+
+    self.send_json = function(code, data)
+        self.start_response(code)
+        if data then
+            local response = sjson.encode(data)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", response:len())
+            self.end_header()
+            self.send(response)
+        else
+            self.send_header("Content-Length", 0)
+            self.end_header()
+        end
+        self.reset()
+    end
+
 
     local function on_raw_receive(conn, payload)
         local start_pos = 1 -- next position to parse
@@ -122,6 +180,8 @@ function new_http_connection(arg_conn, on_event)
                         elseif header_name == "expect" and header_value == "100-continue" then
                             self.expect_100_continue = true
                             -- NOTE: automatically cleared by start_response and close
+                        elseif header_name == "connection" and header_value == "close" then
+                            self.conn_close = true
                         end
                         on_event(self, "-header", {name=header_name, value=header_value})
                     else
@@ -174,34 +234,27 @@ function new_http_connection(arg_conn, on_event)
         clear_callbacks(arg_conn)
     end
 
-    self.request_processed = function()
-        phase = 0
-        line = ""
-        arg_conn:on("receive", on_raw_receive)
-    end
-
     -- Provide an early way to refuse a connection on the IP:Port information
-    if not on_event(self, "-connected") then
-        arg_conn:close()
-        return nil
-    end
+    on_event(self, "-connected")
 
     -- Register callbacks and wait for data
+    arg_conn:on("receive", on_raw_receive)
     arg_conn:on("sent", on_sent)
     arg_conn:on("disconnection", on_connection_closed)
-    self.request_processed()
+    self.reset()
 
     return self
 end
 
 
-function new_http_server(port, on_event)
+local function new_http_server(port, on_event)
     -- on_event(http_connection, event, arg)
-    --   event == "-connected":     arg = nil, ret = bool -> true=accept, false=refuse
+    --   event == "-connected":     arg = nil
     --   event == "-request":       arg = { method=..., path=..., proto=..., ver=... }
     --   event == "-header":        arg = { name=..., value=... }
     --   event == "-end-of-header"  arg = nil
     --   event == "-body":          arg = data chunk
+    --   event == "-end-of-body":   arg = nil
     --   event == "-disconnected":  arg = nil
     --   event == "-error":         arg = { reason=..., data=... }
 
@@ -229,10 +282,7 @@ function new_http_server(port, on_event)
 end -- new_http_server
 
 
-http_server_factory = {
-    -- Create a new http_server that is listening on a port
+return {
     new = new_http_server,
 }
-
-return http_server_factory
 -- vim: set sw=4 ts=4 et:

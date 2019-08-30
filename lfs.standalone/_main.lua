@@ -1,43 +1,73 @@
 httpserver = require("httpserver")
+restrouter = require("restrouter")
+
+schemes = {
+    wave =              { 1, 2, 3, 4 },
+    fullstep =          { 1, 2, 3, 4 },
+    halfstep =          { 1, 2, 3, 4 },
+    halfstep_w_ena =    { 1, 2, 3, 4 },
+}
+
+speed = 2400
+scheme = schemes.fullstep
+
+function rest_speed(self, event, arg)
+    if event == "-request" then
+        print("Speed; method='" .. arg.method .. "', #path='" .. #arg.path .. "'")
+        for i, v in ipairs(arg.path) do
+            print("Speed path; idx='" .. i .. "', value='" .. v .. "'")
+        end
+
+        if arg.method == "GET" and #arg.path == 1 then
+            print("Speed queried;")
+            self.send_json(200, { speed = speed })
+            return
+        end
+
+        if arg.method == "POST" and #arg.path == 2 then
+            print("Setting speed; value='" .. arg.path[2] .. "'")
+            local new_speed = tonumber(arg.path[2])
+            if new_speed ~= nil then
+                speed = new_speed
+                print("Speed set; speed='" .. speed .. "'")
+                self.send_json(202)
+                return
+            end
+        end
+        self.send_json(400)
+    end
+    -- We don't (yet) need to handle headers nor the request body
+end
+
+function rest_scheme(self, event, arg)
+end
+
+function rest_step_to(self, event, arg)
+end
+
+function rest_step_by(self, event, arg)
+end
+
+router = restrouter.new(
+{ 
+    speed = rest_speed,
+    scheme = rest_scheme,
+    step = 
+    {
+        to = rest_step_to,
+        by = rest_step_by
+    },
+})
 
 function on_http_event(self, event, arg)
-    if event == "-connected" then
-        local peer_port, peer_ip = self.conn:getpeer()
-        print("Incoming connection; ip='" .. peer_ip .. "', port='" .. peer_port .. "'")
-        -- we can store whatever we want in @self
-        self.peer_ip = peer_ip
-        self.peer_port = peer_port
-        return true
+    if self.route then
+        self:route(event, arg)
     elseif event == "-request" then
         print("Request; method='" .. arg.method .. "', path='" .. arg.path .. "', proto='" .. arg.proto .. "', ver='" .. arg.ver .. "'")
-        -- we can store whatever we want in @self
-        self.method = arg.method
-        self.path = arg.path
-    elseif event == "-header" then
-        print("Request header; name='" .. arg.name .. "', value='" .. arg.value .. "'")
-    elseif event == "-end-of-header" then
-        print("Request header done;")
-        self.start_response(200, "OK")
-        self.send_header("X-Your-IP", self.peer_ip)
-        self.send_header("X-Your-Port", self.peer_port)
-        self.send_header("X-Req-Method", self.method)
-        self.send_header("X-Req-Path", self.path)
-        self.send_header("Content-Length", self.content_length)
-        self.send_header("Content-Type", "text/plain")
-        self.start_body()
-        if self.content_length == 0 then
-            self.close()
+        if not router.request(self, arg.method, arg.path) then
+            -- Now we don't have any other type of content
+            self.send_json(404)
         end
-    elseif event == "-body" then
-        local chunk_len = arg:len()
-        print("Request body; length='" .. chunk_len .. "', start='" .. arg:sub(1, 16) .. "'")
-        -- self.send(arg:lower())
-        self.send(arg)
-    elseif event == "-end-of-body" then
-        print("Request done;")
-        self.close()
-    elseif event == "-disconnected" then
-        print("Connection closed;")
     end
 end
 
@@ -45,7 +75,8 @@ end
 function on_wifi_got_ip(T)
     print("Connected to wifi; ip='" .. T.IP .. "'")
     print("Starting server; port='80'")
-    srv = httpserver.new(80, on_http_event)
+    httpserver.new(80, on_http_event)
+
 end
 
 
