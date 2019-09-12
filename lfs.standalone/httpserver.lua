@@ -3,12 +3,11 @@
 ------------------------------------------------------------------------------
 
 -- NOTE:
--- http_connection and http_server are objects
--- Their constructors are plain functions which return such objects (or nil in case of error)
+-- An http_connection is an object
+-- Its constructor's a plain function which return such an object (or nil in case of error)
 -- The objects contain only public data and functions
 -- The private data and functions live in the closure context of the object (i.e. they are locals of the constructor)
 -- The user is free to store whatever data in the objects and add whatever methods he needs
--- sckt:on(whatever) callbacks *must* be reset manually, otherwise they leak the memory
 
 local sjson = require("sjson")
 
@@ -43,6 +42,15 @@ http_response_codes[503] = "Service Unavailable"
 
 
 -- Create a new http_connection object
+-- on_event(http_connection, event, arg)
+--   event == "-connected":     arg = nil
+--   event == "-request":       arg = { method=..., path=..., proto=..., ver=... }
+--   event == "-header":        arg = { name=..., value=... }
+--   event == "-end-of-header"  arg = nil
+--   event == "-body":          arg = data chunk
+--   event == "-end-of-body":   arg = nil
+--   event == "-disconnected":  arg = nil
+--   event == "-error":         arg = { reason=..., data=... }
 local function new_http_connection(arg_conn, on_event)
     local self = {
         conn = arg_conn, -- the connection
@@ -56,6 +64,7 @@ local function new_http_connection(arg_conn, on_event)
     local idle = true
 
     local function clear_callbacks(sckt)
+        -- sckt:on(whatever) callbacks *must* be reset manually, otherwise they leak the memory
         sckt:on("sent", nil)
         sckt:on("receive", nil)
         sckt:on("disconnection", nil)
@@ -247,42 +256,7 @@ local function new_http_connection(arg_conn, on_event)
 end
 
 
-local function new_http_server(port, on_event)
-    -- on_event(http_connection, event, arg)
-    --   event == "-connected":     arg = nil
-    --   event == "-request":       arg = { method=..., path=..., proto=..., ver=... }
-    --   event == "-header":        arg = { name=..., value=... }
-    --   event == "-end-of-header"  arg = nil
-    --   event == "-body":          arg = data chunk
-    --   event == "-end-of-body":   arg = nil
-    --   event == "-disconnected":  arg = nil
-    --   event == "-error":         arg = { reason=..., data=... }
-
-    if on_event == nil then
-        return nil
-    end
-
-    local self = {
-        srv = net.createServer(net.TCP, 15),
-    }
-
-    self.close = function()
-        if self.srv then
-            self.srv:close()
-            self.srv = nil
-        end
-    end
-
-    -- Start listening
-    self.srv:listen(port, function(conn)
-        new_http_connection(conn, on_event)
-    end)
-
-    return self
-end -- new_http_server
-
-
 return {
-    new = new_http_server,
+    new = new_http_connection,
 }
 -- vim: set sw=4 ts=4 et:

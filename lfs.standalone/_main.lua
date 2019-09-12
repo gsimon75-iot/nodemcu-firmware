@@ -55,7 +55,7 @@ router = restrouter.new(
     step = 
     {
         to = rest_step_to,
-        by = rest_step_by
+        by = rest_step_by,
     },
 })
 
@@ -63,7 +63,6 @@ function on_http_event(self, event, arg)
     if self.route then
         self:route(event, arg)
     elseif event == "-request" then
-        print("Request; method='" .. arg.method .. "', path='" .. arg.path .. "', proto='" .. arg.proto .. "', ver='" .. arg.ver .. "'")
         if not router.request(self, arg.method, arg.path) then
             -- Now we don't have any other type of content
             self.send_json(404)
@@ -73,10 +72,12 @@ end
 
 
 function on_wifi_got_ip(T)
-    print("Connected to wifi; ip='" .. T.IP .. "'")
-    print("Starting server; port='80'")
-    httpserver.new(80, on_http_event)
-
+    local port = 80
+    print("Connected to wifi, starting server; ip='" .. T.IP .. "', port='" .. port .. "'")
+    local srv = net.createServer(net.TCP, 15)
+    srv:listen(port, function(conn)
+        httpserver.new(conn, on_http_event)
+    end)
 end
 
 
