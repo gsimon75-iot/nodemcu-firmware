@@ -80,13 +80,15 @@ local function new_stepper_motor(pinout)
     local self = {
         speed = 6,
         position = 0,
+        keep_locked = false,
+        scheme_name = "halfstep_w_ena"
     }
 
-    local scheme = schemes.fullstep
+    local scheme = schemes[self.scheme_name]
     local wanted_pos = 0
     local lock_when_done = false
 
-    local scheme = schemes.fullstep
+    local scheme = schemes.halfstep_w_ena
     local current_phase = 1
     
     -- Set the pins as output
@@ -153,14 +155,14 @@ local function new_stepper_motor(pinout)
     self.step_to = function (pos, lock)
         print("Step to; pos='" .. pos .. "'")
         wanted_pos = pos
-        lock_when_done = lock
+        lock_when_done = self.keep_locked
         t:start()
     end
 
     self.step_by = function (pos, lock)
         print("Step by; pos='" .. pos .. "'")
         wanted_pos = self.position + pos
-        lock_when_done = lock
+        lock_when_done = self.keep_locked
         t:start()
     end
 
@@ -171,9 +173,22 @@ local function new_stepper_motor(pinout)
 
     self.set_scheme = function (name)
         if schemes[name] then
-            scheme = schemes[name]
+            self.scheme_name = name
+            scheme = schemes[self.scheme_name]
             current_phase = 1
+            return true
         end
+        return false
+    end
+
+    self.set_lock_policy = function (lck)
+        self.keep_locked = lck
+    end
+
+    self.release = function ()
+        t:stop()
+        current_phase = 1
+        set_state(0)
     end
 
     return self

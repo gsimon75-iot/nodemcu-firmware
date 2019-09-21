@@ -2,14 +2,12 @@ httpserver = require("httpserver")
 restrouter = require("restrouter")
 stepper_motor = require("stepper_motor")
 
+function toboolean(s)
+    return (s == "true") and true or ((s == false) and false) or nil
+end
 
 function rest_speed(self, event, arg)
     if event == "-request" then
-        --print("Speed; method='" .. arg.method .. "', #path='" .. #arg.path .. "'")
-        --for i, v in ipairs(arg.path) do
-        --    print("Speed path; idx='" .. i .. "', value='" .. v .. "'")
-        --end
-
         if arg.method == "GET" and #arg.path == 1 then
             print("Speed queried;")
             self.send_json(200, { speed = motor.speed })
@@ -28,10 +26,26 @@ function rest_speed(self, event, arg)
 
         self.send_json(400)
     end
-    -- We don't (yet) need to handle headers nor the request body
 end
 
 function rest_scheme(self, event, arg)
+    if event == "-request" then
+        if arg.method == "GET" and #arg.path == 1 then
+            print("Scheme queried;")
+            self.send_json(200, { scheme = motor.scheme_name })
+            return
+        end
+
+        if arg.method == "PUT" and #arg.path == 2 then
+            print("Change scheme; value='" .. arg.path[2] .. "'")
+            if motor.set_scheme(arg.path[2]) then
+                self.send_json(202)
+                return
+            end
+        end
+
+        self.send_json(400)
+    end
 end
 
 function rest_position(self, event, arg)
@@ -64,7 +78,35 @@ function rest_position(self, event, arg)
 
         self.send_json(400)
     end
-    -- We don't (yet) need to handle headers nor the request body
+end
+
+function rest_lock(self, event, arg)
+    if event == "-request" then
+        if arg.method == "GET" and #arg.path == 1 then
+            print("Lock policy queried;")
+            self.send_json(200, { lock = motor.keep_locked })
+            return
+        end
+
+        if arg.method == "PUT" and #arg.path == 2 then
+            print("Change lock policy; value='" .. arg.path[2] .. "'")
+            local new_lock = toboolean(arg.path[2])
+            if new_lock ~= nil then
+                motor.set_lock_policy(new_lock)
+                self.send_json(202)
+                return
+            end
+        end
+
+        if arg.method == "DELETE" and #arg.path == 1 then
+            print("Releasing lock;")
+            motor.release()
+            self.send_json(202)
+            return
+        end
+
+        self.send_json(400)
+    end
 end
 
 router = restrouter.new(
@@ -72,6 +114,7 @@ router = restrouter.new(
     speed = rest_speed,
     scheme = rest_scheme,
     position = rest_position,
+    lock = rest_lock,
 })
 
 function on_http_event(self, event, arg)
@@ -103,7 +146,7 @@ function on_wifi_got_ip(T)
     })
 end
 
-
+node.setcpufreq(node.CPU160MHZ)
 print("Connecting to wifi;")
 wifi.setmode(wifi.STATION)
 wifi.eventmon.register(wifi.eventmon.STA_GOT_IP, on_wifi_got_ip)
